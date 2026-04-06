@@ -1,3 +1,15 @@
+---
+title: SRE Incident Response
+emoji: "\U0001F6A8"
+colorFrom: red
+colorTo: orange
+sdk: docker
+app_port: 8000
+tags:
+  - openenv
+pinned: false
+---
+
 # SRE Incident Response Environment
 
 An OpenEnv-compatible reinforcement learning environment that simulates production incident response. AI agents must investigate microservice architectures, diagnose root causes, and apply fixes — just like a real on-call SRE engineer.
