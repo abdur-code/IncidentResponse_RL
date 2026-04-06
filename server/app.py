@@ -91,6 +91,28 @@ def state_no_session():
     return State()
 
 
+@app.post("/mcp")
+def mcp_endpoint(body: dict = {}):
+    """Minimal MCP JSON-RPC endpoint for OpenEnv spec compliance."""
+    method = body.get("method", "")
+    req_id = body.get("id", 1)
+    if method == "initialize":
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "serverInfo": {"name": "sre-incident-response", "version": "1.0.0"},
+                "capabilities": {},
+            },
+        }
+    return {
+        "jsonrpc": "2.0",
+        "id": req_id,
+        "result": {},
+    }
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────
 
 @app.get("/")
