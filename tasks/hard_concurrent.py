@@ -339,6 +339,7 @@ SCENARIO = IncidentScenario(
         "payment-service", "deploy", "rollback", "v3.8.2", "v3.8.1", "NullPointerException", "crash",
         "cache-redis", "memory", "leak", "eviction", "auth-service", "fallback",
     ],
+    requires_multi_root_diagnosis=True,
 
     weights={
         "correct_service": 0.15,

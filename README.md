@@ -14,6 +14,26 @@ pinned: false
 
 An OpenEnv-compatible reinforcement learning environment that simulates production incident response. AI agents must investigate microservice architectures, diagnose root causes, and apply fixes — just like a real on-call SRE engineer.
 
+## Key Contributions
+
+- **Multi-root causal reasoning benchmark**
+  Supports concurrent independent failures with partial credit scoring.
+- **Strict action-based evaluation**
+  Rewards only applied remediations, not just correct diagnosis.
+- **Deterministic grading system**
+  No LLM judge; reproducible scores via structured matching.
+- **Progressive investigation design**
+  Information revealed via actions (logs, metrics, traces).
+- **Failure-mode realism**
+  Includes cascading failures, misleading signals, and red herrings.
+
+## Why this environment is challenging
+
+- Models tend to identify one root cause and stop, missing concurrent failures.
+- Logs include signal + noise, requiring filtering.
+- Fixing one service may not resolve the system.
+- Requires both reasoning and action execution.
+
 ## Motivation
 
 Every tech company has on-call rotations, yet there's no standardized benchmark for evaluating AI agents on incident response. This environment fills that gap by simulating realistic production incidents with:
@@ -136,13 +156,12 @@ All actions are sent as a single JSON object with an `action_type` field. Option
 | `restart_service` | `service` | Restarts pods. Fixes OOM/leak issues. No effect if root cause is elsewhere. |
 | `rollback_deploy` | `service`, `target_version` | Rolls back to specified version. Must match exact version string. |
 | `scale_up` | `service`, `replicas` | Increases replica count. Can alleviate memory pressure. |
-| `drain_traffic` | `service` | Stops routing traffic to the service. |
 
 ### Terminal Action
 
 | Action | Required Fields | Effect |
 |--------|----------------|--------|
-| `submit_diagnosis` | `root_cause_service`, `root_cause_category`, `fix_description` | Ends episode, triggers grading. |
+| `submit_diagnosis` | `fix_description` + (`root_cause_service`, `root_cause_category`) or (`root_cause_services[]`, `root_cause_categories[]`) | Ends episode, triggers grading. |
 
 ### Root Cause Categories
 
@@ -155,6 +174,7 @@ All actions are sent as a single JSON object with an `action_type` field. Option
 {"action_type": "check_metrics", "service": "db-postgres"}
 {"action_type": "rollback_deploy", "service": "payment-service", "target_version": "v3.8.1"}
 {"action_type": "submit_diagnosis", "root_cause_service": "db-postgres", "root_cause_category": "db_deadlock", "fix_description": "Restarted db-postgres to clear deadlock caused by analytics-cron query"}
+{"action_type": "submit_diagnosis", "root_cause_services": ["payment-service", "cache-redis"], "root_cause_categories": ["bad_deploy", "memory_leak"], "fix_description": "Rolled back payment-service to v3.8.1 and restarted cache-redis"}
 ```
 
 ## Observation Space
@@ -207,6 +227,12 @@ The grader is generic and rubric-based. Each task defines its own weights:
 
 **Diagnosis text scoring** uses deterministic keyword matching — the grader checks if the fix description mentions key terms (service names, fault types, fix actions). No LLM-based judging.
 
+**Multi-root scoring** uses partial credit (e.g., 1 of 2 causes receives 50% of the root-cause component).
+
+**Required fix scoring** is order-independent and set-based. Exact required fixes are matched regardless of execution order; alternative remediations do not count.
+
+**No-fix cap** applies when no required remediation is matched: terminal score is capped below solve threshold.
+
 **Investigation thoroughness** checks whether the agent examined at least one root-cause service before submitting.
 
 ## Setup
@@ -217,6 +243,14 @@ The grader is generic and rubric-based. Each task defines its own weights:
 pip install -r requirements.txt
 python -m uvicorn server.app:app --host 0.0.0.0 --port 8000
 ```
+
+### Testing
+
+```bash
+python -m pytest -q
+```
+
+Pytest cache files are ignored via `.gitignore` (`.pytest_cache/`).
 
 ### Docker
 

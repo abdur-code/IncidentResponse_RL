@@ -62,6 +62,8 @@ class IncidentScenario:
     root_cause_categories: List[RootCauseCategory] = field(default_factory=list)
     required_fixes: List[RequiredFix] = field(default_factory=list)
     diagnosis_keywords: List[str] = field(default_factory=list)
+    requires_multi_root_diagnosis: bool = False
+    no_fix_score_cap: float = 0.69
 
     # Grading weights
     weights: Dict[str, float] = field(default_factory=dict)

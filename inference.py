@@ -76,6 +76,9 @@ You are given the current state of a microservice architecture and must:
 3. Apply the correct fix(es)
 4. Submit a diagnosis
 
+CRITICAL CONSTRAINT:
+- Do not submit diagnosis until all alerts are resolved and all services are HEALTHY.
+
 Available actions (respond with a single JSON object):
 
 Investigation actions (require "service" field):
@@ -92,10 +95,9 @@ Remediation actions (require "service" field):
 - restart_service: Restart all pods for a service
 - rollback_deploy: Rollback to a specific version (requires "target_version")
 - scale_up: Increase replica count (requires "replicas")
-- drain_traffic: Stop routing traffic to a service
 
 Terminal action:
-- submit_diagnosis: Submit your diagnosis (requires "root_cause_service", "root_cause_category", "fix_description")
+- submit_diagnosis: Submit your diagnosis (supports singular fields or list fields for multi-root tasks)
 
 Root cause categories: oom_crash, db_deadlock, bad_deploy, memory_leak, network_partition, disk_full, config_error, cert_expiry, dns_failure, rate_limit
 
@@ -103,6 +105,7 @@ IMPORTANT: Respond with ONLY a JSON object like:
 {"action_type": "read_logs", "service": "auth-service"}
 {"action_type": "rollback_deploy", "service": "payment-service", "target_version": "v3.8.1"}
 {"action_type": "submit_diagnosis", "root_cause_service": "db-postgres", "root_cause_category": "db_deadlock", "fix_description": "Restarted db-postgres to clear deadlock"}
+{"action_type": "submit_diagnosis", "root_cause_services": ["payment-service", "cache-redis"], "root_cause_categories": ["bad_deploy", "memory_leak"], "fix_description": "Rolled back payment-service and restarted cache-redis"}
 """)
 
 
@@ -179,6 +182,29 @@ def parse_action(response_text: str) -> Action:
     return Action(**data)
 
 
+def incident_fully_resolved(obs_dict: dict) -> bool:
+    """Return True when there are no active alerts and all services are HEALTHY."""
+    alerts = obs_dict.get("active_alerts", [])
+    has_alert = any(str(alert).startswith("[ALERT") for alert in alerts)
+
+    services = obs_dict.get("services", {})
+    all_healthy = all(
+        state.get("status") == "HEALTHY"
+        for state in services.values()
+    )
+
+    return (not has_alert) and all_healthy
+
+
+def first_unhealthy_service(obs_dict: dict) -> str | None:
+    """Pick a deterministic next target when submit is attempted too early."""
+    services = obs_dict.get("services", {})
+    for name in sorted(services.keys()):
+        if services[name].get("status") != "HEALTHY":
+            return name
+    return None
+
+
 # ── Main ──────────────────────────────────────────────────────────────
 
 async def run_task(task_id: str) -> float:
@@ -197,8 +223,9 @@ async def run_task(task_id: str) -> float:
     try:
         obs, session_id = env.reset(task_id=task_id)
         obs_dict = obs.model_dump()
+        max_steps = env.sessions[session_id].scenario.max_steps
 
-        for step in range(1, MAX_STEPS + 1):
+        for step in range(1, max_steps + 1):
             if obs_dict.get("done", False):
                 break
 
@@ -210,11 +237,20 @@ async def run_task(task_id: str) -> float:
                 error = None
             except Exception as e:
                 error = str(e)
-                log_step(step=step, action="parse_error", reward=0.0, done=False, error=error)
-                rewards.append(0.0)
+                parse_penalty = -0.02
+                log_step(step=step, action="parse_error", reward=parse_penalty, done=False, error=error)
+                rewards.append(parse_penalty)
                 steps_taken = step
-                history.append(f"Step {step}: parse_error -> reward 0.00")
+                history.append(f"Step {step}: parse_error -> reward {parse_penalty:+.2f}")
                 continue
+
+            if action.action_type == ActionType.SUBMIT_DIAGNOSIS and not incident_fully_resolved(obs_dict):
+                fallback_service = first_unhealthy_service(obs_dict) or "api-gateway"
+                action = Action(
+                    action_type=ActionType.CHECK_DEPENDENCIES,
+                    service=fallback_service,
+                )
+                error = "submit_blocked_active_alerts"
 
             obs, reward, done, info = env.step(session_id, action)
             obs_dict = obs.model_dump()
