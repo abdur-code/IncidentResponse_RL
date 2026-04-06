@@ -1,0 +1,27 @@
+name: sre-incident-response
+version: "1.0.0"
+description: "SRE Incident Response environment — train AI agents to diagnose and fix production incidents"
+
+tasks:
+  - id: easy
+    name: Single Service OOM Crash
+    difficulty: easy
+    max_steps: 15
+  - id: medium
+    name: Cascading Database Deadlock
+    difficulty: medium
+    max_steps: 25
+  - id: hard
+    name: Concurrent Faults with Misleading Evidence
+    difficulty: hard
+    max_steps: 35
+
+models:
+  action: models.Action
+  observation: models.Observation
+  reward: models.Reward
+  state: models.State
+
+runtime:
+  port: 8000
+  entrypoint: server.app:app
