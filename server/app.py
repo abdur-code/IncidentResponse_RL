@@ -57,6 +57,40 @@ class TaskInfo(BaseModel):
     description: str
 
 
+# ── OpenEnv spec endpoints ─────────────────────────────────────────────
+
+@app.get("/health")
+def health():
+    return {"status": "healthy"}
+
+
+@app.get("/metadata")
+def metadata():
+    return {
+        "name": "sre-incident-response",
+        "description": "SRE Incident Response environment — train AI agents to diagnose and fix production incidents",
+        "version": "1.0.0",
+    }
+
+
+@app.get("/schema")
+def schema():
+    return {
+        "action": Action.model_json_schema(),
+        "observation": Observation.model_json_schema(),
+        "state": State.model_json_schema(),
+    }
+
+
+@app.get("/state")
+def state_no_session():
+    """Return state for the most recent session, or empty state if none."""
+    if env.sessions:
+        last_sid = list(env.sessions.keys())[-1]
+        return env.state(last_sid)
+    return State()
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────
 
 @app.get("/")
@@ -64,7 +98,7 @@ def root():
     return {
         "name": "SRE Incident Response Environment",
         "version": "1.0.0",
-        "endpoints": ["/reset", "/step", "/state/{session_id}", "/tasks"],
+        "endpoints": ["/reset", "/step", "/state/{session_id}", "/tasks", "/health", "/metadata", "/schema"],
     }
 
 
