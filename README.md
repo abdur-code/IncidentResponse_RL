@@ -79,16 +79,34 @@ Tasks are auto-discovered from the `tasks/` directory. Each task is a self-conta
 | Task ID | Name | Difficulty | Max Steps | Root Cause | Fix Required |
 |---------|------|-----------|-----------|------------|--------------|
 | `easy` | Single Service OOM Crash | Easy | 15 | `auth-service` (OOM) | `restart_service(auth-service)` |
+| `easy_disk` | Database Disk Full | Easy | 15 | `db-postgres` (disk full) | `restart_service(db-postgres)` |
+| `easy_dns` | Notification Service DNS Failure | Easy | 15 | `notification-service` (DNS failure) | `restart_service(notification-service)` |
 | `medium` | Cascading Database Deadlock | Medium | 25 | `db-postgres` (deadlock) | `restart_service(db-postgres)` |
+| `medium_cert` | Expired TLS Certificate Cascading Failures | Medium | 25 | `api-gateway` (cert expiry) | `restart_service(api-gateway)` |
+| `medium_config` | Config Error with Misleading Database Symptoms | Medium | 25 | `user-service` (config error) | `restart_service(user-service)` |
 | `hard` | Concurrent Faults + Misleading Evidence | Hard | 35 | `payment-service` (bad deploy) AND `cache-redis` (memory leak) | `rollback_deploy(payment-service, v3.8.1)` AND `restart_service(cache-redis)` |
+| `hard_partition_ratelimit` | Network Partition with Concurrent Rate Limiting | Hard | 35 | `cache-redis` (network partition) AND `api-gateway` (rate limit) | `restart_service(cache-redis)` AND `restart_service(api-gateway)` |
+| `hard_disk_cert` | Database Disk Exhaustion with Auth Certificate Failure | Hard | 35 | `db-postgres` (disk full) AND `auth-service` (cert expiry) | `restart_service(db-postgres)` AND `restart_service(auth-service)` |
 
 ### Task Details
 
-**Easy** — Alert directly names `auth-service` as down. Logs clearly show OOM crash cycle (heap growth, OOM kills, restart exhaustion). Single root cause, single fix.
+**Easy: Single Service OOM Crash** — Alert directly names `auth-service` as down. Logs clearly show OOM crash cycle (heap growth, OOM kills, restart exhaustion). Single root cause, single fix.
 
-**Medium** — Alerts blame `payment-service` and `user-service` (both are victims). The real cause is a long-running analytics query deadlocking `db-postgres`. Agent must notice "writes fail but reads work", follow dependency chain to the database, and read `db-postgres` logs to find the deadlock. Red herring: `cache-redis` miss ratio alert (benign TTL expiry).
+**Easy: Database Disk Full** — WAL archiver falls behind on `db-postgres`, disk fills to 100%, database panics and shuts down. `user-service` and `payment-service` go down because they can't connect. Logs show unmistakable PANIC with "No space left on device".
 
-**Hard** — Two independent faults at the same time: (1) `payment-service` has a bad deploy (v3.8.2, NullPointerException in new validator module), (2) `cache-redis` has a memory leak causing eviction storms that degrade `auth-service`. Red herrings: `user-service` config warnings (benign), `notification-service` queue backup (victim of auth-service). Agent must find and fix BOTH faults. After fixing only one, post-remediation check shows remaining services are still unhealthy.
+**Easy: DNS Failure** — `notification-service`'s internal DNS cache becomes stale after SMTP relay provider changed IP. DNS lookups fail, only `notification-service` is affected (leaf node). Zero cascading — straightforward single-service fix.
+
+**Medium: Cascading Database Deadlock** — Alerts blame `payment-service` and `user-service` (both are victims). The real cause is a long-running analytics query deadlocking `db-postgres`. Agent must notice "writes fail but reads work", follow dependency chain to the database, and read `db-postgres` logs to find the deadlock. Red herring: `cache-redis` miss ratio alert (benign TTL expiry).
+
+**Medium: Expired TLS Certificate** — `api-gateway`'s TLS certificate expires but cert-manager renewed it in the Kubernetes secret — the running process still has the old cert in memory. ~40% of incoming connections fail TLS handshake. Red herrings: `auth-service` shows connection resets (victim, not cause), `notification-service` queue backs up (downstream effect). Agent must trace failures upstream to the entry point.
+
+**Medium: Config Error** — A configmap update pushed a wrong database hostname to `user-service` (`db-postgres-primary.svc.cluster.local` doesn't exist). Red herrings: `db-postgres` has an informational alert about dropped connections (it's actually fine), and the error looks like DNS failure but `diff_config` reveals it's a config error. Key reasoning: if `db-postgres` were broken, `payment-service` would also be down — it's not.
+
+**Hard: Concurrent Faults + Misleading Evidence** — Two independent faults at the same time: (1) `payment-service` has a bad deploy (v3.8.2, NullPointerException in new validator module), (2) `cache-redis` has a memory leak causing eviction storms that degrade `auth-service`. Red herrings: `user-service` config warnings (benign), `notification-service` queue backup (victim of auth-service). Agent must find and fix BOTH faults. After fixing only one, post-remediation check shows remaining services are still unhealthy.
+
+**Hard: Network Partition + Rate Limiting** — Two independent faults: (1) `cache-redis` is network-partitioned from app pods but still reachable from monitoring subnet (appears "healthy" in dashboards but has 0 connected clients), (2) `api-gateway` has a misconfigured rate limit (RATE_LIMIT_RPS dropped from 1000 to 100, causing 60% of legitimate traffic to get 429s). Red herrings: cache-redis metrics look normal, `db-postgres` shows elevated connections (auth fallback), `notification-service` queue growing (victim).
+
+**Hard: Disk Full + Auth Certificate Expiry** — Two independent faults on separate dependency paths: (1) `db-postgres` disk fills from WAL accumulation, database crashes — `user-service` and `payment-service` go down, (2) `auth-service`'s internal mTLS certificate expired — 30% of requests fail (cached TLS sessions still work). The db-postgres crash is loud (100% down) while auth-service failure is quiet (30% intermittent). Agent must understand the dependency graph to realize auth-service degradation can't come from db-postgres.
 
 ### Adding New Tasks
 
@@ -120,8 +138,14 @@ IncidentResponse_RL/
 ├── tasks/                     # Task definitions (auto-discovered)
 │   ├── __init__.py            # Auto-discovery loader → SCENARIOS dict
 │   ├── easy_oom.py            # Easy: Single Service OOM Crash
+│   ├── easy_disk.py           # Easy: Database Disk Full
+│   ├── easy_dns.py            # Easy: Notification Service DNS Failure
 │   ├── medium_deadlock.py     # Medium: Cascading Database Deadlock
-│   └── hard_concurrent.py     # Hard: Concurrent Faults + Misleading Evidence
+│   ├── medium_cert.py         # Medium: Expired TLS Certificate Cascading Failures
+│   ├── medium_config.py       # Medium: Config Error with Misleading DB Symptoms
+│   ├── hard_concurrent.py     # Hard: Concurrent Faults + Misleading Evidence
+│   ├── hard_partition_ratelimit.py  # Hard: Network Partition + Rate Limiting
+│   └── hard_disk_cert.py      # Hard: Disk Exhaustion + Auth Certificate Failure
 │
 ├── graders/                   # Scoring engine
 │   ├── __init__.py
@@ -336,7 +360,7 @@ All baselines run via Groq free tier.
 | `MODEL_NAME` | Model identifier | `Qwen/Qwen2.5-72B-Instruct` |
 | `HF_TOKEN` | HuggingFace API key | Required |
 | `PORT` | Server port | `8000` |
-| `SRE_TASKS` | Comma-separated task IDs to run in inference | `easy,medium,hard` |
+| `SRE_TASKS` | Comma-separated task IDs to run in inference | `easy,easy_disk,easy_dns,medium,medium_cert,medium_config,hard,hard_partition_ratelimit,hard_disk_cert` |
 
 ## OpenEnv Spec Compliance
 
@@ -345,7 +369,7 @@ All baselines run via Groq free tier.
 - `reset()` returns initial observation
 - `state()` returns current episode metadata
 - Typed Pydantic models for Action, Observation, and State
-- 3 tasks with programmatic graders (easy, medium, hard)
+- 9 tasks across 3 difficulty tiers with programmatic graders covering all 10 root cause categories
 - Scores in 0.0-1.0 range with partial progress signals
 - Working Dockerfile for containerized execution
 - Baseline inference script (`inference.py`) with reproducible scores

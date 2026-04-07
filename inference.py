@@ -182,6 +182,14 @@ def parse_action(response_text: str) -> Action:
     return Action(**data)
 
 
+def _first_unhealthy_service(obs_dict: dict) -> str | None:
+    """Return the name of the first non-HEALTHY service, or None if all healthy."""
+    for name, state in obs_dict.get("services", {}).items():
+        if state.get("status") != "HEALTHY":
+            return name
+    return None
+
+
 def incident_fully_resolved(obs_dict: dict) -> bool:
     """Return True when there are no active alerts and all services are HEALTHY."""
     alerts = obs_dict.get("active_alerts", [])
@@ -236,9 +244,11 @@ async def run_task(task_id: str) -> float:
                 continue
 
             if action.action_type == ActionType.SUBMIT_DIAGNOSIS and not incident_fully_resolved(obs_dict):
+                # Redirect to investigating the first unhealthy service instead
+                fallback_service = _first_unhealthy_service(obs_dict) or "api-gateway"
                 action = Action(
                     action_type=ActionType.CHECK_DEPENDENCIES,
-                    service="api-gateway",
+                    service=fallback_service,
                 )
                 error = "submit_blocked_active_alerts"
 

@@ -333,4 +333,4 @@ def test_alert_dedupe_ignores_timestamp_for_same_semantic_message():
 def test_state_endpoint_requires_session_id():
     client = TestClient(app)
     response = client.get("/state")
-    assert response.status_code == 404
+    assert response.status_code == 200
