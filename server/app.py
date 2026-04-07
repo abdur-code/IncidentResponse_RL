@@ -105,6 +105,15 @@ def mcp_endpoint(body: Optional[dict] = None):
     }
 
 
+@app.get("/state")
+def state_no_session():
+    """Return state for the most recent session, or empty state if none."""
+    if env.sessions:
+        last_sid = list(env.sessions.keys())[-1]
+        return env.state(last_sid)
+    return State()
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────
 
 @app.get("/")

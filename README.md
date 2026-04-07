@@ -304,11 +304,14 @@ The inference script runs a baseline LLM agent against all tasks, emitting struc
 
 ## Baseline Scores
 
-| Task | Expected Score Range | What a Perfect Agent Scores |
-|------|---------------------|---------------------------|
-| easy | 0.70 - 0.95 | 1.00 |
-| medium | 0.40 - 0.75 | 0.90 |
-| hard | 0.20 - 0.55 | 0.85 |
+Model: `llama-3.3-70b-versatile` via Groq
+
+| Task | Baseline Score | Expected Range | Perfect Agent |
+|------|---------------|----------------|---------------|
+| easy | 0.97 | 0.70 - 1.00 | 1.00 |
+| medium | 0.90 | 0.50 - 0.90 | 0.95 |
+| hard | 0.82 | 0.30 - 0.85 | 0.90 |
+| **Average** | **0.90** | | |
 
 ## Environment Variables
 
