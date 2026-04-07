@@ -126,9 +126,10 @@ def root():
 
 
 @app.post("/reset", response_model=ResetResponse)
-def reset(request: ResetRequest):
+def reset(request: Optional[ResetRequest] = None):
+    req = request or ResetRequest()
     try:
-        obs, session_id = env.reset(task_id=request.task_id, seed=request.seed)
+        obs, session_id = env.reset(task_id=req.task_id, seed=req.seed)
         return ResetResponse(observation=obs, session_id=session_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
