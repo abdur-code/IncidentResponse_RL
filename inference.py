@@ -283,7 +283,7 @@ async def run_task(task_id: str) -> float:
 
 
 async def main() -> None:
-    task_ids = os.getenv("SRE_TASKS", "easy,medium,hard").split(",")
+    task_ids = os.getenv("SRE_TASKS", "easy,easy_disk,easy_dns,medium,medium_cert,medium_config,hard,hard_partition_ratelimit,hard_disk_cert").split(",")
     scores = {}
 
     for task_id in task_ids:

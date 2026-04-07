@@ -7,12 +7,36 @@ tasks:
     name: Single Service OOM Crash
     difficulty: easy
     max_steps: 15
+  - id: easy_disk
+    name: Database Disk Full
+    difficulty: easy
+    max_steps: 15
+  - id: easy_dns
+    name: Notification Service DNS Failure
+    difficulty: easy
+    max_steps: 15
   - id: medium
     name: Cascading Database Deadlock
     difficulty: medium
     max_steps: 25
+  - id: medium_cert
+    name: Expired TLS Certificate Cascading Failures
+    difficulty: medium
+    max_steps: 25
+  - id: medium_config
+    name: Config Error with Misleading Database Symptoms
+    difficulty: medium
+    max_steps: 25
   - id: hard
     name: Concurrent Faults with Misleading Evidence
+    difficulty: hard
+    max_steps: 35
+  - id: hard_partition_ratelimit
+    name: Network Partition with Concurrent Rate Limiting
+    difficulty: hard
+    max_steps: 35
+  - id: hard_disk_cert
+    name: Database Disk Exhaustion with Auth Certificate Failure
     difficulty: hard
     max_steps: 35
 

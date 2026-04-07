@@ -304,14 +304,29 @@ The inference script runs a baseline LLM agent against all tasks, emitting struc
 
 ## Baseline Scores
 
-Model: `llama-3.3-70b-versatile` via Groq
+All baselines run via Groq free tier.
 
-| Task | Baseline Score | Expected Range | Perfect Agent |
-|------|---------------|----------------|---------------|
-| easy | 0.97 | 0.70 - 1.00 | 1.00 |
-| medium | 0.90 | 0.50 - 0.90 | 0.95 |
-| hard | 0.82 | 0.30 - 0.85 | 0.90 |
-| **Average** | **0.90** | | |
+| Task | Difficulty | Llama 3.1 8B | Llama 4 Scout 17B | Llama 3.3 70B |
+|------|:---:|:---:|:---:|:---:|
+| easy | Easy | 1.00 | 1.00 | 0.77 |
+| easy_disk | Easy | 0.72 | 0.10 | 0.72 |
+| easy_dns | Easy | 0.40 | 0.00 | 0.10 |
+| medium | Medium | 0.90 | 0.90 | 0.90 |
+| medium_cert | Medium | 0.59 | 0.64 | 0.64 |
+| medium_config | Medium | 0.62 | 0.62 | 0.10* |
+| hard | Hard | 0.00 | 0.65 | 0.78 |
+| hard_partition_ratelimit | Hard | 0.68 | 0.65 | 0.68 |
+| hard_disk_cert | Hard | 0.55 | 0.64 | 0.28* |
+| **Average** | | **0.61** | **0.58** | **0.66** |
+
+\* Rate-limited by Groq free tier (100K TPD); score is lower than expected.
+
+**Key observations:**
+- No single model dominates all tasks — different architectures struggle with different failure modes
+- `easy_dns` is deceptively hard: agents fixate on the SMTP relay instead of restarting the service to flush DNS cache
+- Hard multi-root tasks (hard, hard_partition_ratelimit, hard_disk_cert) genuinely challenge all models
+- Larger models are better at multi-root diagnosis but all models struggle with novel failure modes
+- Scores are non-deterministic due to LLM sampling — variance is expected across runs
 
 ## Environment Variables
 
