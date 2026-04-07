@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 from fastapi.testclient import TestClient
 
 from env.environment import IncidentResponseEnv
@@ -198,26 +200,60 @@ def test_scale_up_default_replicas_matches_required_fix_of_three():
     env = IncidentResponseEnv()
 
     obs, sid = env.reset("easy", seed=11)
-    scenario = env.sessions[sid].scenario
-    original_required_fixes = list(scenario.required_fixes)
-    scenario.required_fixes = [
+    session = env.sessions[sid]
+    scenario_copy = deepcopy(session.scenario)
+    scenario_copy.required_fixes = [
         RequiredFix(action="scale_up", service="auth-service", replicas=3)
     ]
+    session.scenario = scenario_copy
 
-    try:
-        obs, reward, done, info = _submit(
-            env,
-            sid,
-            Action(
-                action_type=ActionType.SCALE_UP,
-                service="auth-service",
-            ),
-        )
+    obs, reward, done, info = _submit(
+        env,
+        sid,
+        Action(
+            action_type=ActionType.SCALE_UP,
+            service="auth-service",
+        ),
+    )
 
-        assert reward == 0.05
-        assert env.sessions[sid].remediations_applied[-1]["replicas"] == 3
-    finally:
-        scenario.required_fixes = original_required_fixes
+    assert reward == 0.05
+    assert env.sessions[sid].remediations_applied[-1]["replicas"] == 3
+
+
+def test_grader_ignores_replicas_when_required_fix_unspecified():
+    env = IncidentResponseEnv()
+
+    obs, sid = env.reset("easy", seed=13)
+    session = env.sessions[sid]
+    scenario_copy = deepcopy(session.scenario)
+    scenario_copy.required_fixes = [
+        RequiredFix(action="scale_up", service="auth-service")
+    ]
+    session.scenario = scenario_copy
+
+    _submit(
+        env,
+        sid,
+        Action(
+            action_type=ActionType.SCALE_UP,
+            service="auth-service",
+        ),
+    )
+
+    obs, reward, done, info = _submit(
+        env,
+        sid,
+        Action(
+            action_type=ActionType.SUBMIT_DIAGNOSIS,
+            root_cause_service="auth-service",
+            root_cause_category=RootCauseCategory.OOM_CRASH,
+            fix_description="Scaled auth service to recover from overload",
+        ),
+    )
+
+    breakdown = info["grader_result"]["breakdown"]
+    assert done
+    assert breakdown["correct_fix"] > 0.0
 
 
 def test_singular_and_plural_diagnosis_fields_do_not_double_count():

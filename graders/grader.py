@@ -5,7 +5,7 @@ Scores episodes on a 0.0-1.0 scale based on weighted rubric components.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, List, Set, Tuple
+from typing import TYPE_CHECKING, Dict, List, Set
 
 from models import (
     GraderResult,
@@ -196,7 +196,21 @@ def _collect_submitted_categories(diagnosis) -> Set:
 
 
 def _remediation_matches_required_fix(remediation: Dict, required_fix: RequiredFix) -> bool:
-    return _canonical_remediation(remediation) == _canonical_required_fix(required_fix)
+    if _normalize_text(remediation.get("action", "")) != _normalize_text(required_fix.action):
+        return False
+    if _normalize_text(remediation.get("service", "")) != _normalize_text(required_fix.service):
+        return False
+
+    remediation_target_version = remediation.get("target_version")
+    if required_fix.target_version and (
+        _normalize_text(remediation_target_version) != _normalize_text(required_fix.target_version)
+    ):
+        return False
+
+    if required_fix.replicas is not None and remediation.get("replicas") != required_fix.replicas:
+        return False
+
+    return True
 
 
 def _matched_required_fix_count(required_fixes: List[RequiredFix], remediations: List[Dict]) -> int:
@@ -209,25 +223,3 @@ def _matched_required_fix_count(required_fixes: List[RequiredFix], remediations:
 
 def _normalize_text(value: object) -> str:
     return str(value).strip().lower()
-
-
-def _canonical_required_fix(required_fix: RequiredFix) -> Tuple[str, str, str, str]:
-    target_version = _normalize_text(required_fix.target_version) if required_fix.target_version else ""
-    replicas = str(required_fix.replicas) if required_fix.replicas is not None else ""
-    return (
-        _normalize_text(required_fix.action),
-        _normalize_text(required_fix.service),
-        target_version,
-        replicas,
-    )
-
-
-def _canonical_remediation(remediation: Dict) -> Tuple[str, str, str, str]:
-    target_version = remediation.get("target_version")
-    replicas = remediation.get("replicas")
-    return (
-        _normalize_text(remediation.get("action", "")),
-        _normalize_text(remediation.get("service", "")),
-        _normalize_text(target_version) if target_version else "",
-        str(replicas) if replicas is not None else "",
-    )
