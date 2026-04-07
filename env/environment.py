@@ -33,6 +33,8 @@ from env.services import (
     recompute_health,
 )
 
+DEFAULT_SCALE_UP_REPLICAS = 3
+
 
 class Session:
     """Tracks the state of a single episode."""
@@ -67,7 +69,6 @@ class Session:
         self.actions: list[Action] = []
         self.services_investigated: Set[str] = set()
         self.remediations_applied: list[Dict[str, Any]] = []
-        self.applied_fix_signatures: Set[Tuple[str, str, Optional[str], Optional[int]]] = set()
         self.diagnosis: Optional[Action] = None
 
         # Seeded evidence ordering (minimal deterministic variation)
@@ -144,14 +145,14 @@ class IncidentResponseEnv:
         # ── Remediation actions ──
         elif action.action_type in REMEDIATION_ACTIONS:
             action_result, reward = self._handle_remediation(session, action)
+            effective_replicas = self._effective_replicas_for_action(action)
             remediation_record = {
                 "action": action.action_type.value,
                 "service": service_name,
                 "target_version": action.target_version,
-                "replicas": action.replicas,
+                "replicas": effective_replicas,
             }
             session.remediations_applied.append(remediation_record)
-            session.applied_fix_signatures.add(self._build_remediation_signature(remediation_record))
 
         # ── Submit diagnosis ──
         elif action.action_type == ActionType.SUBMIT_DIAGNOSIS:
@@ -323,7 +324,7 @@ class IncidentResponseEnv:
                 reward = -0.05
 
         elif action.action_type == ActionType.SCALE_UP:
-            replicas = action.replicas or 3
+            replicas = self._effective_replicas_for_action(action)
             if fix_matched:
                 session.services[svc]["replicas"] = replicas
                 session.services[svc]["status"] = ServiceStatus.HEALTHY
@@ -354,17 +355,6 @@ class IncidentResponseEnv:
 
         return result, reward
 
-    def _build_remediation_signature(
-        self,
-        remediation: Dict[str, Any],
-    ) -> Tuple[str, str, Optional[str], Optional[int]]:
-        return (
-            remediation["action"],
-            remediation["service"],
-            remediation.get("target_version"),
-            remediation.get("replicas"),
-        )
-
     def _fix_matches(self, action: Action, req_fix: RequiredFix) -> bool:
         """Check if an action matches a required fix."""
         if action.action_type.value != req_fix.action:
@@ -373,7 +363,15 @@ class IncidentResponseEnv:
             return False
         if req_fix.target_version and action.target_version != req_fix.target_version:
             return False
+        effective_replicas = self._effective_replicas_for_action(action)
+        if req_fix.replicas is not None and effective_replicas != req_fix.replicas:
+            return False
         return True
+
+    def _effective_replicas_for_action(self, action: Action) -> Optional[int]:
+        if action.action_type == ActionType.SCALE_UP and action.replicas is None:
+            return DEFAULT_SCALE_UP_REPLICAS
+        return action.replicas
 
     def _grade(self, session: Session) -> GraderResult:
         """Deterministic grading of the episode."""
