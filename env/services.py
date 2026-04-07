@@ -2,7 +2,9 @@
 Service simulation helpers — generates alerts, formats data, cascades dependency health.
 """
 
-from typing import Any, Dict, List, Set, Tuple
+import datetime as dt
+import re
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from models import ServiceStatus
 
@@ -12,18 +14,79 @@ def generate_alerts(
     scenario_alerts: List[str],
     fixed_services: Set[str],
 ) -> List[str]:
-    """Regenerate alerts based on current service state.
-    If all root-cause services are fixed, alerts clear."""
-    alerts: List[str] = []
+    """Merge scenario-authored and dynamic alerts using deterministic ordering."""
+    dynamic_alerts: List[str] = []
     for svc_name, svc in services.items():
         status = svc["status"]
         if status == ServiceStatus.DOWN and svc_name not in fixed_services:
-            alerts.append(f"[ALERT SEV-1] {svc_name}: service is DOWN, 0 healthy pods")
+            dynamic_alerts.append(f"[ALERT SEV-1] {svc_name}: service is DOWN, 0 healthy pods")
         elif status == ServiceStatus.DEGRADED and svc_name not in fixed_services:
-            alerts.append(f"[ALERT SEV-2] {svc_name}: service is DEGRADED")
-    if not alerts:
+            dynamic_alerts.append(f"[ALERT SEV-2] {svc_name}: service is DEGRADED")
+
+    filtered_scenario_alerts: List[str] = []
+    for alert in scenario_alerts:
+        _, service_name, _ = _parse_alert_metadata(alert)
+        if service_name and service_name in services:
+            svc_status = services[service_name]["status"]
+            if svc_status == ServiceStatus.HEALTHY or service_name in fixed_services:
+                continue
+        filtered_scenario_alerts.append(alert)
+
+    combined_alerts = filtered_scenario_alerts + dynamic_alerts
+    deduped: List[str] = []
+    seen_keys = set()
+    for alert in combined_alerts:
+        key = _alert_dedupe_key(alert)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        deduped.append(alert)
+    deduped.sort(key=_alert_sort_key)
+
+    if not deduped:
         return ["[INFO] All services HEALTHY — no active alerts."]
-    return alerts
+    return deduped
+
+
+def _parse_alert_metadata(alert: str) -> Tuple[int, Optional[str], Optional[dt.datetime]]:
+    severity_rank = 4
+    if "SEV-1" in alert:
+        severity_rank = 1
+    elif "SEV-2" in alert:
+        severity_rank = 2
+    elif "SEV-3" in alert:
+        severity_rank = 3
+
+    service_name: Optional[str] = None
+    service_match = re.search(r"\] ([a-z0-9-]+):", alert)
+    if service_match:
+        service_name = service_match.group(1)
+
+    timestamp: Optional[dt.datetime] = None
+    timestamp_match = re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", alert)
+    if timestamp_match:
+        timestamp = dt.datetime.fromisoformat(timestamp_match.group(0).replace("Z", "+00:00"))
+
+    return severity_rank, service_name, timestamp
+
+
+def _alert_dedupe_key(alert: str) -> Tuple[str, str, str]:
+    severity_rank, service_name, _ = _parse_alert_metadata(alert)
+    severity = f"SEV-{severity_rank}" if severity_rank < 4 else "INFO"
+
+    message = alert
+    if service_name and f"{service_name}:" in alert:
+        message = alert.split(f"{service_name}:", 1)[1].strip()
+    message = re.sub(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", "", message).strip()
+
+    return (severity, service_name or "", message)
+
+
+def _alert_sort_key(alert: str) -> Tuple[int, str, str]:
+    severity_rank, service_name, timestamp = _parse_alert_metadata(alert)
+    service_sort = service_name or "zzzzzz"
+    timestamp_sort = timestamp.isoformat() if timestamp else "9999-12-31T23:59:59+00:00"
+    return (severity_rank, service_sort, timestamp_sort)
 
 
 def recompute_health(

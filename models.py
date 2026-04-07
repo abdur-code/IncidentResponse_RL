@@ -31,7 +31,6 @@ class ActionType(str, Enum):
     RESTART_SERVICE = "restart_service"
     ROLLBACK_DEPLOY = "rollback_deploy"
     SCALE_UP = "scale_up"
-    DRAIN_TRAFFIC = "drain_traffic"
 
     # Terminal
     SUBMIT_DIAGNOSIS = "submit_diagnosis"
@@ -65,7 +64,6 @@ REMEDIATION_ACTIONS = {
     ActionType.RESTART_SERVICE,
     ActionType.ROLLBACK_DEPLOY,
     ActionType.SCALE_UP,
-    ActionType.DRAIN_TRAFFIC,
 }
 
 
@@ -77,7 +75,9 @@ class Action(BaseModel):
     target_version: Optional[str] = None
     replicas: Optional[int] = Field(None, ge=1, le=10)
     root_cause_service: Optional[str] = None
+    root_cause_services: Optional[List[str]] = None
     root_cause_category: Optional[RootCauseCategory] = None
+    root_cause_categories: Optional[List[RootCauseCategory]] = None
     fix_description: Optional[str] = None
 
 

@@ -3,6 +3,7 @@ Core environment engine — implements reset/step/state for the SRE Incident Res
 """
 
 import uuid
+import random
 from typing import Any, Dict, Optional, Set, Tuple
 
 from models import (
@@ -36,9 +37,10 @@ from env.services import (
 class Session:
     """Tracks the state of a single episode."""
 
-    def __init__(self, scenario: IncidentScenario, session_id: str):
+    def __init__(self, scenario: IncidentScenario, session_id: str, seed: int = 0):
         self.session_id = session_id
         self.scenario = scenario
+        self.seed = seed
         self.step_count = 0
         self.done = False
         self.cumulative_reward = 0.0
@@ -65,7 +67,16 @@ class Session:
         self.actions: list[Action] = []
         self.services_investigated: Set[str] = set()
         self.remediations_applied: list[Dict[str, Any]] = []
+        self.applied_fix_signatures: Set[Tuple[str, str, Optional[str], Optional[int]]] = set()
         self.diagnosis: Optional[Action] = None
+
+        # Seeded evidence ordering (minimal deterministic variation)
+        randomizer = random.Random(seed)
+        self.logs: Dict[str, list[str]] = {}
+        for service_name, log_lines in scenario.logs.items():
+            shuffled_logs = list(log_lines)
+            randomizer.shuffle(shuffled_logs)
+            self.logs[service_name] = shuffled_logs
 
 
 class IncidentResponseEnv:
@@ -84,7 +95,7 @@ class IncidentResponseEnv:
 
         scenario = SCENARIOS[task_id]
         session_id = str(uuid.uuid4())[:8]
-        session = Session(scenario, session_id)
+        session = Session(scenario, session_id, seed=seed)
         self.sessions[session_id] = session
 
         # Build initial observation
@@ -133,12 +144,14 @@ class IncidentResponseEnv:
         # ── Remediation actions ──
         elif action.action_type in REMEDIATION_ACTIONS:
             action_result, reward = self._handle_remediation(session, action)
-            session.remediations_applied.append({
+            remediation_record = {
                 "action": action.action_type.value,
                 "service": service_name,
                 "target_version": action.target_version,
                 "replicas": action.replicas,
-            })
+            }
+            session.remediations_applied.append(remediation_record)
+            session.applied_fix_signatures.add(self._build_remediation_signature(remediation_record))
 
         # ── Submit diagnosis ──
         elif action.action_type == ActionType.SUBMIT_DIAGNOSIS:
@@ -222,7 +235,7 @@ class IncidentResponseEnv:
         svc = action.service
 
         if action.action_type == ActionType.READ_LOGS:
-            logs = scenario.logs.get(svc, [])
+            logs = session.logs.get(svc, [])
             return format_logs(logs)
 
         elif action.action_type == ActionType.CHECK_METRICS:
@@ -311,20 +324,14 @@ class IncidentResponseEnv:
 
         elif action.action_type == ActionType.SCALE_UP:
             replicas = action.replicas or 3
-            if fix_matched or (svc in scenario.root_cause_services):
+            if fix_matched:
                 session.services[svc]["replicas"] = replicas
-                session.fixed_services.add(svc)
                 session.services[svc]["status"] = ServiceStatus.HEALTHY
                 result = f"Service '{svc}' scaled to {replicas} replicas. Memory pressure alleviated. Status: HEALTHY"
                 reward = 0.05
             else:
                 session.services[svc]["replicas"] = replicas
                 result = f"Service '{svc}' scaled to {replicas} replicas. No effect on the underlying issue."
-                reward = -0.05
-
-        elif action.action_type == ActionType.DRAIN_TRAFFIC:
-            result = f"Traffic drained from '{svc}'. Service is no longer receiving requests."
-            if svc not in scenario.root_cause_services:
                 reward = -0.05
 
         # Recompute health after remediation
@@ -346,6 +353,17 @@ class IncidentResponseEnv:
             result += "\n\n[POST-REMEDIATION CHECK] All services are now HEALTHY."
 
         return result, reward
+
+    def _build_remediation_signature(
+        self,
+        remediation: Dict[str, Any],
+    ) -> Tuple[str, str, Optional[str], Optional[int]]:
+        return (
+            remediation["action"],
+            remediation["service"],
+            remediation.get("target_version"),
+            remediation.get("replicas"),
+        )
 
     def _fix_matches(self, action: Action, req_fix: RequiredFix) -> bool:
         """Check if an action matches a required fix."""

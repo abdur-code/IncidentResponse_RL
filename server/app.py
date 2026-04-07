@@ -82,18 +82,10 @@ def schema():
     }
 
 
-@app.get("/state")
-def state_no_session():
-    """Return state for the most recent session, or empty state if none."""
-    if env.sessions:
-        last_sid = list(env.sessions.keys())[-1]
-        return env.state(last_sid)
-    return State()
-
-
 @app.post("/mcp")
-def mcp_endpoint(body: dict = {}):
+def mcp_endpoint(body: Optional[dict] = None):
     """Minimal MCP JSON-RPC endpoint for OpenEnv spec compliance."""
+    body = body or {}
     method = body.get("method", "")
     req_id = body.get("id", 1)
     if method == "initialize":

@@ -5,14 +5,12 @@ Scores episodes on a 0.0-1.0 scale based on weighted rubric components.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING, Dict, List, Set, Tuple
 
 from models import (
-    ActionType,
     GraderResult,
-    INVESTIGATION_ACTIONS,
-    RootCauseCategory,
 )
+from env.scenario import RequiredFix
 
 if TYPE_CHECKING:
     from env.environment import Session
@@ -28,71 +26,67 @@ def grade_episode(session: Session) -> GraderResult:
 
     score = 0.0
 
-    # ── 1. Root cause service identification ──
+    # ── 1. Root cause service identification (partial credit) ──
     service_score = 0.0
-    if diagnosis and diagnosis.root_cause_service:
-        if diagnosis.root_cause_service in scenario.root_cause_services:
-            service_score = weights.get("correct_service", 0)
-            notes.append(f"Correct root cause service: {diagnosis.root_cause_service}")
-        else:
-            notes.append(
-                f"Wrong root cause service: {diagnosis.root_cause_service} "
-                f"(expected one of: {scenario.root_cause_services})"
-            )
+    submitted_services = _collect_submitted_services(diagnosis)
+    expected_services = {_normalize_text(service) for service in scenario.root_cause_services}
+    if submitted_services:
+        matched_services = submitted_services & expected_services
+        service_fraction = len(matched_services) / max(len(expected_services), 1)
+        service_score = weights.get("correct_service", 0) * service_fraction
+        notes.append(
+            f"Root cause services: matched {len(matched_services)}/{len(expected_services)} "
+            f"({sorted(matched_services) or 'none'})"
+        )
+        missing_services = expected_services - matched_services
+        if missing_services:
+            notes.append(f"Missing root cause services: {sorted(missing_services)}")
     else:
-        notes.append("No root cause service submitted.")
-    breakdown["correct_service"] = service_score
+        notes.append("No root cause service(s) submitted.")
+    breakdown["correct_service"] = round(service_score, 4)
     score += service_score
 
-    # ── 2. Root cause category ──
+    # ── 2. Root cause category (partial credit) ──
     category_score = 0.0
-    if diagnosis and diagnosis.root_cause_category:
-        if diagnosis.root_cause_category in scenario.root_cause_categories:
-            category_score = weights.get("correct_category", 0)
-            notes.append(f"Correct root cause category: {diagnosis.root_cause_category.value}")
-        else:
+    submitted_categories = _collect_submitted_categories(diagnosis)
+    expected_categories = set(scenario.root_cause_categories)
+    if submitted_categories:
+        matched_categories = submitted_categories & expected_categories
+        category_fraction = len(matched_categories) / max(len(expected_categories), 1)
+        category_score = weights.get("correct_category", 0) * category_fraction
+        notes.append(
+            f"Root cause categories: matched {len(matched_categories)}/{len(expected_categories)} "
+            f"({[c.value for c in sorted(matched_categories, key=lambda c: c.value)] or 'none'})"
+        )
+        missing_categories = expected_categories - matched_categories
+        if missing_categories:
             notes.append(
-                f"Wrong root cause category: {diagnosis.root_cause_category.value} "
-                f"(expected one of: {[c.value for c in scenario.root_cause_categories]})"
+                "Missing root cause categories: "
+                f"{[c.value for c in sorted(missing_categories, key=lambda c: c.value)]}"
             )
     else:
-        notes.append("No root cause category submitted.")
-    breakdown["correct_category"] = category_score
+        notes.append("No root cause category/categories submitted.")
+    breakdown["correct_category"] = round(category_score, 4)
     score += category_score
 
-    # ── 3. Primary fix applied ──
-    fix_score = 0.0
-    primary_fix = scenario.required_fixes[0] if scenario.required_fixes else None
-    if primary_fix and primary_fix.service in session.fixed_services:
-        fix_score = weights.get("correct_fix", 0)
-        notes.append(f"Primary fix applied: {primary_fix.action}({primary_fix.service})")
-    elif primary_fix:
+    # ── 3. Required fix coverage (set-based, order-independent) ──
+    required_fix_fraction = 0.0
+    if scenario.required_fixes:
+        matched_required_fixes = _matched_required_fix_count(
+            scenario.required_fixes,
+            session.remediations_applied,
+        )
+        required_fix_fraction = matched_required_fixes / len(scenario.required_fixes)
         notes.append(
-            f"Primary fix NOT applied. Expected: {primary_fix.action}({primary_fix.service})"
+            f"Required fixes matched: {matched_required_fixes}/{len(scenario.required_fixes)}"
         )
-    breakdown["correct_fix"] = fix_score
-    score += fix_score
-
-    # ── 4. Secondary fixes (hard tier) ──
-    secondary_score = 0.0
-    secondary_weight = weights.get("secondary_fix", 0)
-    if secondary_weight > 0 and len(scenario.required_fixes) > 1:
-        secondary_fixes = scenario.required_fixes[1:]
-        fixed_count = sum(
-            1 for f in secondary_fixes if f.service in session.fixed_services
-        )
-        fraction = fixed_count / len(secondary_fixes)
-        secondary_score = secondary_weight * fraction
-        if fixed_count == len(secondary_fixes):
-            notes.append(f"All {len(secondary_fixes)} secondary fix(es) applied.")
-        elif fixed_count > 0:
-            notes.append(
-                f"Partial secondary fixes: {fixed_count}/{len(secondary_fixes)} applied."
-            )
-        else:
-            notes.append(f"No secondary fixes applied (needed {len(secondary_fixes)}).")
-    breakdown["secondary_fix"] = secondary_score
-    score += secondary_score
+    correct_fix_weight = weights.get("correct_fix", 0)
+    secondary_fix_weight = weights.get("secondary_fix", 0)
+    fix_score = correct_fix_weight * required_fix_fraction
+    secondary_score = secondary_fix_weight * required_fix_fraction
+    breakdown["correct_fix"] = round(fix_score, 4)
+    breakdown["secondary_fix"] = round(secondary_score, 4)
+    score += fix_score + secondary_score
 
     # ── 5. Diagnosis text quality (keyword matching) ──
     text_score = 0.0
@@ -139,16 +133,7 @@ def grade_episode(session: Session) -> GraderResult:
     penalty_per = weights.get("wrong_penalty", 0.05)
     wrong_count = 0
     for rem in session.remediations_applied:
-        is_correct = False
-        for req_fix in scenario.required_fixes:
-            if rem["action"] == req_fix.action and rem["service"] == req_fix.service:
-                if req_fix.target_version and rem.get("target_version") != req_fix.target_version:
-                    continue
-                is_correct = True
-                break
-        # Also accept scale_up on root cause services as correct
-        if rem["service"] in scenario.root_cause_services and rem["action"] in ("restart_service", "scale_up", "rollback_deploy"):
-            is_correct = True
+        is_correct = any(_remediation_matches_required_fix(rem, req_fix) for req_fix in scenario.required_fixes)
         if not is_correct:
             wrong_count += 1
             penalty += penalty_per
@@ -157,6 +142,22 @@ def grade_episode(session: Session) -> GraderResult:
         notes.append(f"Penalty: {wrong_count} wrong remediation(s) (-{penalty:.2f})")
     breakdown["wrong_penalty"] = -round(penalty, 4)
     score -= penalty
+
+    # ── 8. No-fix cap ──
+    if scenario.required_fixes:
+        matched_required_fixes = _matched_required_fix_count(
+            scenario.required_fixes,
+            session.remediations_applied,
+        )
+        fix_fraction = matched_required_fixes / len(scenario.required_fixes)
+        base_cap = scenario.no_fix_score_cap
+        dynamic_cap = base_cap + (1.0 - base_cap) * fix_fraction
+        if fix_fraction < 1.0 and score > dynamic_cap:
+            score = dynamic_cap
+            notes.append(
+                "Required fix coverage is partial; "
+                f"score capped at {dynamic_cap:.2f} ({matched_required_fixes}/{len(scenario.required_fixes)} fixes)."
+            )
 
     # ── Final clamp ──
     score = round(max(0.0, min(1.0, score)), 4)
@@ -167,4 +168,66 @@ def grade_episode(session: Session) -> GraderResult:
         solved=solved,
         breakdown=breakdown,
         notes=notes,
+    )
+
+
+def _collect_submitted_services(diagnosis) -> Set[str]:
+    if diagnosis is None:
+        return set()
+
+    submitted: Set[str] = set()
+    if diagnosis.root_cause_service:
+        submitted.add(_normalize_text(diagnosis.root_cause_service))
+    if diagnosis.root_cause_services:
+        submitted.update(_normalize_text(service) for service in diagnosis.root_cause_services)
+    return submitted
+
+
+def _collect_submitted_categories(diagnosis) -> Set:
+    if diagnosis is None:
+        return set()
+
+    submitted = set()
+    if diagnosis.root_cause_category:
+        submitted.add(diagnosis.root_cause_category)
+    if diagnosis.root_cause_categories:
+        submitted.update(diagnosis.root_cause_categories)
+    return submitted
+
+
+def _remediation_matches_required_fix(remediation: Dict, required_fix: RequiredFix) -> bool:
+    return _canonical_remediation(remediation) == _canonical_required_fix(required_fix)
+
+
+def _matched_required_fix_count(required_fixes: List[RequiredFix], remediations: List[Dict]) -> int:
+    matched = 0
+    for req_fix in required_fixes:
+        if any(_remediation_matches_required_fix(rem, req_fix) for rem in remediations):
+            matched += 1
+    return matched
+
+
+def _normalize_text(value: object) -> str:
+    return str(value).strip().lower()
+
+
+def _canonical_required_fix(required_fix: RequiredFix) -> Tuple[str, str, str, str]:
+    target_version = _normalize_text(required_fix.target_version) if required_fix.target_version else ""
+    replicas = str(required_fix.replicas) if required_fix.replicas is not None else ""
+    return (
+        _normalize_text(required_fix.action),
+        _normalize_text(required_fix.service),
+        target_version,
+        replicas,
+    )
+
+
+def _canonical_remediation(remediation: Dict) -> Tuple[str, str, str, str]:
+    target_version = remediation.get("target_version")
+    replicas = remediation.get("replicas")
+    return (
+        _normalize_text(remediation.get("action", "")),
+        _normalize_text(remediation.get("service", "")),
+        _normalize_text(target_version) if target_version else "",
+        str(replicas) if replicas is not None else "",
     )
