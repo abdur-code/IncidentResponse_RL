@@ -159,8 +159,8 @@ def grade_episode(session: Session) -> GraderResult:
                 f"score capped at {dynamic_cap:.2f} ({matched_required_fixes}/{len(scenario.required_fixes)} fixes)."
             )
 
-    # ── Final clamp ──
-    score = round(max(0.0, min(1.0, score)), 4)
+    # ── Final clamp — strictly within (0, 1), never exactly 0.0 or 1.0 ──
+    score = round(max(0.001, min(0.999, score)), 4)
     solved = score >= 0.7
 
     return GraderResult(
