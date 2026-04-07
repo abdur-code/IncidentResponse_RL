@@ -143,11 +143,14 @@ class IncidentResponseEnv:
         # ── Remediation actions ──
         elif action.action_type in REMEDIATION_ACTIONS:
             action_result, reward = self._handle_remediation(session, action)
+            effective_replicas = action.replicas
+            if action.action_type == ActionType.SCALE_UP and effective_replicas is None:
+                effective_replicas = 3
             remediation_record = {
                 "action": action.action_type.value,
                 "service": service_name,
                 "target_version": action.target_version,
-                "replicas": action.replicas,
+                "replicas": effective_replicas,
             }
             session.remediations_applied.append(remediation_record)
 
@@ -360,7 +363,10 @@ class IncidentResponseEnv:
             return False
         if req_fix.target_version and action.target_version != req_fix.target_version:
             return False
-        if req_fix.replicas is not None and action.replicas != req_fix.replicas:
+        effective_replicas = action.replicas
+        if action.action_type == ActionType.SCALE_UP and effective_replicas is None:
+            effective_replicas = 3
+        if req_fix.replicas is not None and effective_replicas != req_fix.replicas:
             return False
         return True
 

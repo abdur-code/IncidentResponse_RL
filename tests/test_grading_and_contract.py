@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from env.environment import IncidentResponseEnv
+from env.scenario import RequiredFix
 from env.services import generate_alerts
 from models import Action, ActionType, RootCauseCategory, ServiceStatus
 from server.app import app
@@ -191,6 +192,27 @@ def test_required_fix_matching_normalizes_case_and_ignores_irrelevant_fields():
     breakdown = info["grader_result"]["breakdown"]
     assert done
     assert breakdown["correct_fix"] > 0.0
+
+
+def test_scale_up_default_replicas_matches_required_fix_of_three():
+    env = IncidentResponseEnv()
+
+    obs, sid = env.reset("easy", seed=11)
+    env.sessions[sid].scenario.required_fixes = [
+        RequiredFix(action="scale_up", service="auth-service", replicas=3)
+    ]
+
+    obs, reward, done, info = _submit(
+        env,
+        sid,
+        Action(
+            action_type=ActionType.SCALE_UP,
+            service="auth-service",
+        ),
+    )
+
+    assert reward == 0.05
+    assert env.sessions[sid].remediations_applied[-1]["replicas"] == 3
 
 
 def test_singular_and_plural_diagnosis_fields_do_not_double_count():
