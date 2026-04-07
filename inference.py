@@ -196,15 +196,6 @@ def incident_fully_resolved(obs_dict: dict) -> bool:
     return (not has_alert) and all_healthy
 
 
-def first_unhealthy_service(obs_dict: dict) -> str | None:
-    """Pick a deterministic next target when submit is attempted too early."""
-    services = obs_dict.get("services", {})
-    for name in sorted(services.keys()):
-        if services[name].get("status") != "HEALTHY":
-            return name
-    return None
-
-
 # ── Main ──────────────────────────────────────────────────────────────
 
 async def run_task(task_id: str) -> float:
@@ -245,10 +236,9 @@ async def run_task(task_id: str) -> float:
                 continue
 
             if action.action_type == ActionType.SUBMIT_DIAGNOSIS and not incident_fully_resolved(obs_dict):
-                fallback_service = first_unhealthy_service(obs_dict) or "api-gateway"
                 action = Action(
                     action_type=ActionType.CHECK_DEPENDENCIES,
-                    service=fallback_service,
+                    service="api-gateway",
                 )
                 error = "submit_blocked_active_alerts"
 

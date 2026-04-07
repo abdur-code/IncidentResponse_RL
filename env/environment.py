@@ -67,7 +67,6 @@ class Session:
         self.actions: list[Action] = []
         self.services_investigated: Set[str] = set()
         self.remediations_applied: list[Dict[str, Any]] = []
-        self.applied_fix_signatures: Set[Tuple[str, str, Optional[str], Optional[int]]] = set()
         self.diagnosis: Optional[Action] = None
 
         # Seeded evidence ordering (minimal deterministic variation)
@@ -151,7 +150,6 @@ class IncidentResponseEnv:
                 "replicas": action.replicas,
             }
             session.remediations_applied.append(remediation_record)
-            session.applied_fix_signatures.add(self._build_remediation_signature(remediation_record))
 
         # ── Submit diagnosis ──
         elif action.action_type == ActionType.SUBMIT_DIAGNOSIS:
@@ -354,17 +352,6 @@ class IncidentResponseEnv:
 
         return result, reward
 
-    def _build_remediation_signature(
-        self,
-        remediation: Dict[str, Any],
-    ) -> Tuple[str, str, Optional[str], Optional[int]]:
-        return (
-            remediation["action"],
-            remediation["service"],
-            remediation.get("target_version"),
-            remediation.get("replicas"),
-        )
-
     def _fix_matches(self, action: Action, req_fix: RequiredFix) -> bool:
         """Check if an action matches a required fix."""
         if action.action_type.value != req_fix.action:
@@ -372,6 +359,8 @@ class IncidentResponseEnv:
         if action.service != req_fix.service:
             return False
         if req_fix.target_version and action.target_version != req_fix.target_version:
+            return False
+        if req_fix.replicas is not None and action.replicas != req_fix.replicas:
             return False
         return True
 
