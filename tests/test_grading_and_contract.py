@@ -198,21 +198,26 @@ def test_scale_up_default_replicas_matches_required_fix_of_three():
     env = IncidentResponseEnv()
 
     obs, sid = env.reset("easy", seed=11)
-    env.sessions[sid].scenario.required_fixes = [
+    scenario = env.sessions[sid].scenario
+    original_required_fixes = list(scenario.required_fixes)
+    scenario.required_fixes = [
         RequiredFix(action="scale_up", service="auth-service", replicas=3)
     ]
 
-    obs, reward, done, info = _submit(
-        env,
-        sid,
-        Action(
-            action_type=ActionType.SCALE_UP,
-            service="auth-service",
-        ),
-    )
+    try:
+        obs, reward, done, info = _submit(
+            env,
+            sid,
+            Action(
+                action_type=ActionType.SCALE_UP,
+                service="auth-service",
+            ),
+        )
 
-    assert reward == 0.05
-    assert env.sessions[sid].remediations_applied[-1]["replicas"] == 3
+        assert reward == 0.05
+        assert env.sessions[sid].remediations_applied[-1]["replicas"] == 3
+    finally:
+        scenario.required_fixes = original_required_fixes
 
 
 def test_singular_and_plural_diagnosis_fields_do_not_double_count():

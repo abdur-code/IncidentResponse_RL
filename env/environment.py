@@ -33,6 +33,8 @@ from env.services import (
     recompute_health,
 )
 
+DEFAULT_SCALE_UP_REPLICAS = 3
+
 
 class Session:
     """Tracks the state of a single episode."""
@@ -143,9 +145,7 @@ class IncidentResponseEnv:
         # ── Remediation actions ──
         elif action.action_type in REMEDIATION_ACTIONS:
             action_result, reward = self._handle_remediation(session, action)
-            effective_replicas = action.replicas
-            if action.action_type == ActionType.SCALE_UP and effective_replicas is None:
-                effective_replicas = 3
+            effective_replicas = self._effective_replicas_for_action(action)
             remediation_record = {
                 "action": action.action_type.value,
                 "service": service_name,
@@ -324,7 +324,7 @@ class IncidentResponseEnv:
                 reward = -0.05
 
         elif action.action_type == ActionType.SCALE_UP:
-            replicas = action.replicas or 3
+            replicas = self._effective_replicas_for_action(action)
             if fix_matched:
                 session.services[svc]["replicas"] = replicas
                 session.services[svc]["status"] = ServiceStatus.HEALTHY
@@ -363,12 +363,15 @@ class IncidentResponseEnv:
             return False
         if req_fix.target_version and action.target_version != req_fix.target_version:
             return False
-        effective_replicas = action.replicas
-        if action.action_type == ActionType.SCALE_UP and effective_replicas is None:
-            effective_replicas = 3
+        effective_replicas = self._effective_replicas_for_action(action)
         if req_fix.replicas is not None and effective_replicas != req_fix.replicas:
             return False
         return True
+
+    def _effective_replicas_for_action(self, action: Action) -> Optional[int]:
+        if action.action_type == ActionType.SCALE_UP and action.replicas is None:
+            return DEFAULT_SCALE_UP_REPLICAS
+        return action.replicas
 
     def _grade(self, session: Session) -> GraderResult:
         """Deterministic grading of the episode."""
