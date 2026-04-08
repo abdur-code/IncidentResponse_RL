@@ -51,17 +51,20 @@ def log_start(task: str, env: str, model: str) -> None:
 def log_step(step: int, action: str, reward: float, done: bool, error) -> None:
     error_str = str(error) if error is not None else "null"
     done_str = "true" if done else "false"
+    clamped_reward = min(max(reward, -0.99), 0.99)
     print(
-        f"[STEP] step={step} action={action} reward={reward:.2f} done={done_str} error={error_str}",
+        f"[STEP] step={step} action={action} reward={clamped_reward:.2f} done={done_str} error={error_str}",
         flush=True,
     )
 
 
 def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
     success_str = "true" if success else "false"
-    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    clamped_rewards = [min(max(r, -0.99), 0.99) for r in rewards]
+    rewards_str = ",".join(f"{r:.2f}" for r in clamped_rewards)
+    clamped_score = min(max(score, 0.01), 0.99)
     print(
-        f"[END] success={success_str} steps={steps} score={score:.2f} rewards={rewards_str}",
+        f"[END] success={success_str} steps={steps} score={clamped_score:.2f} rewards={rewards_str}",
         flush=True,
     )
 
@@ -272,11 +275,12 @@ async def run_task(task_id: str) -> float:
                     score = info["grader_result"]["score"]
                 break
 
-        # Clamp score to strictly (0, 1) — :.2f rounds 0.001->0.00 and 0.999->1.00
-        score = min(max(score, 0.01), 0.99)
         success = score >= SUCCESS_SCORE_THRESHOLD
 
     finally:
+        # Clamp score to strictly (0, 1) — :.2f rounds 0.01->0.01 and 0.99->0.99
+        score = min(max(score, 0.01), 0.99)
+        success = score >= SUCCESS_SCORE_THRESHOLD
         log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
 
     return score

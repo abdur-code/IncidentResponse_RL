@@ -130,6 +130,8 @@ def reset(request: Optional[ResetRequest] = None):
     req = request or ResetRequest()
     try:
         obs, session_id = env.reset(task_id=req.task_id, seed=req.seed)
+        # Ensure reset observation reward is not exactly 0.0
+        obs.reward = max(0.01, min(0.99, obs.reward))
         return ResetResponse(observation=obs, session_id=session_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -139,12 +141,11 @@ def reset(request: Optional[ResetRequest] = None):
 def step(request: StepRequest):
     try:
         obs, reward, done, info = env.step(request.session_id, request.action)
-        # Clamp reward to strictly (0, 1) if terminal
-        if done:
-            reward = max(0.01, min(0.99, reward))
-            obs.reward = max(0.01, min(0.99, obs.reward))
-            if obs.score is not None:
-                obs.score = max(0.01, min(0.99, obs.score))
+        # Clamp all reward/score fields to strictly (0, 1)
+        reward = max(0.01, min(0.99, reward))
+        obs.reward = max(0.01, min(0.99, obs.reward))
+        if obs.score is not None:
+            obs.score = max(0.01, min(0.99, obs.score))
         # Ensure info is JSON-serializable
         clean_info = {}
         for k, v in info.items():
