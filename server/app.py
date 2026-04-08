@@ -141,15 +141,15 @@ def step(request: StepRequest):
         obs, reward, done, info = env.step(request.session_id, request.action)
         # Clamp reward to strictly (0, 1) if terminal
         if done:
-            reward = max(0.001, min(0.999, reward))
-            obs.reward = max(0.001, min(0.999, obs.reward))
+            reward = max(0.01, min(0.99, reward))
+            obs.reward = max(0.01, min(0.99, obs.reward))
             if obs.score is not None:
-                obs.score = max(0.001, min(0.999, obs.score))
+                obs.score = max(0.01, min(0.99, obs.score))
         # Ensure info is JSON-serializable
         clean_info = {}
         for k, v in info.items():
             if isinstance(v, dict) and "score" in v:
-                v["score"] = max(0.001, min(0.999, v["score"]))
+                v["score"] = max(0.01, min(0.99, v["score"]))
             clean_info[k] = v
         return StepResponse(observation=obs, reward=reward, done=done, info=clean_info)
     except ValueError as e:

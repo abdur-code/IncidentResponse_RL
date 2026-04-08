@@ -108,7 +108,7 @@ class IncidentResponseEnv:
         session = self._get_session(session_id)
         if session.done:
             obs = self._build_observation(session, action_result="Episode already finished.")
-            return obs, 0.001, True, {"error": "Episode already finished."}
+            return obs, 0.01, True, {"error": "Episode already finished."}
 
         session.step_count += 1
         session.actions.append(action)

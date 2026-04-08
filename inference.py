@@ -272,8 +272,8 @@ async def run_task(task_id: str) -> float:
                     score = info["grader_result"]["score"]
                 break
 
-        # Clamp score to [0, 1]
-        score = min(max(score, 0.0), 1.0)
+        # Clamp score to strictly (0, 1) — :.2f rounds 0.001->0.00 and 0.999->1.00
+        score = min(max(score, 0.01), 0.99)
         success = score >= SUCCESS_SCORE_THRESHOLD
 
     finally:
